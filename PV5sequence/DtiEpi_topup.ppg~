@@ -1,0 +1,105 @@
+;****************************************************************
+;
+; Copyright (c) 2001-2007
+; Bruker BioSpin MRI GmbH
+; D-76275 Ettlingen, Germany
+;
+; All Rights Reserved
+;
+; $Id: DtiEpi_topup.ppg,v 1.8.2.6 2009/10/23 09:23:59 dgem Exp $
+
+#include <MRI.include>
+preset off
+
+
+;counter of dummy scans (not acquired; DS set to 0)
+define loopcounter lcDs
+"lcDs = l1"
+
+
+
+#include <PrepModulesHead.mod>
+#include <DwiHead.mod>
+#include <epiHead.mod>
+
+
+lgrad slice = NSLICES
+
+INIT_DEVICES
+
+lgrad r3d<3d> = L[2]
+
+define list<gradient> plusminusgrad = {-1 1}
+
+zgrad Interleaving
+zslice
+
+subr DwiInit()
+
+
+DiffL,  4u
+#include <TriggerPerPhaseStep.mod>
+slice,  10u	fq8b:f1
+#include <TriggerPerSlice.mod>
+subr SatSlices()    
+subr FatSup()
+;----------------------------------slice selection------------------	
+	d1 	grad{(0)|(0)|(t0)} fq1:f1 gatepulse 1 
+	(p0:sp0 	ph0):f1
+	d4 	groff
+;----------------------------------slice rephase--------------------
+	d2 	grad{(0)|(0)|(t1)+r3d(t2)}
+	d3      groff                                
+subr DwiPrep(ph1)   
+        if "lcDs > 0" goto acqDs    
+#include <epi_topup.mod>                   
+goOn,	2.5u        
+;----------------------------------slice loop-----------------------
+	10u islice
+	d0    DwFl0.inc
+	lo to slice times NSLICES
+	1u zslice  
+;----------------------------------averaging loop-------------------
+        d5
+        "lcDs = lcDs - 1"
+        if "lcDs >= 0" goto DiffL      ;dummy scans        
+	lo to DiffL times NA
+;----------------------------------2d loop--------------------------
+	1u igrad Interleaving
+	lo to DiffL times l0
+	1u zgrad Interleaving
+
+;----------------------------------topup--------------------------
+	;2.5u
+        igrad plusminusgrad
+	lo to DiffL times topupc
+        zgrad plusminusgrad
+	0u 
+;----------------------------------3d loop--------------------------
+if( ACQ_dim >= 3 )
+{
+	1u igrad r3d
+	lo to DiffL times ACQ_size[2]
+}
+;----------------------------------diffusion loop-------------------
+subr DwiLoop(DiffL)
+;----------------------------------repetitions loop-----------------
+	lo to DiffL times RealRepeat
+
+SETUP_GOTO(DiffL)
+        goto bye
+        
+; ---- empty acquisition for dummy scans
+acqDs,  1u
+#include <epiDum.mod>
+        goto goOn
+
+
+   
+bye,    1u
+exit
+
+ph0 = 0 2
+ph1 = 1
+
+

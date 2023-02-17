@@ -1,0 +1,101 @@
+;****************************************************************
+;
+; Copyright (c) 2001-2003
+; Bruker BioSpin MRI GmbH
+; D-76275 Ettlingen, Germany
+;
+; All Rights Reserved
+;
+; $Id: DtiEpi_topup.4ch,v 1.1.2.5 2009/10/23 11:51:13 dgem Exp $
+
+#include <MRI.include>
+preset off
+
+
+;counter of dummy scans (not acquired; DS set to 0)
+define loopcounter lcDs
+"lcDs = l1"
+
+define delay d1m5u
+"d1m5u = d1 - 5u"
+
+
+#include <PrepModulesHead.mod>
+#include <DwiHead.mod>
+#include <epiHead.mod>
+
+
+lgrad slice = NSLICES
+
+INIT_DEVICES
+
+lgrad r3d<3d> = L[2]
+
+zgrad Interleaving
+zslice
+
+
+
+
+DiffL,  4u
+#include <TriggerPerPhaseStep.mod>
+slice,  10u	fq8b:f1 fq8b:f2 fq8b:f3 fq8b:f4
+#include <TriggerPerSlice.mod>
+subr SatSlices()     
+subr FatSup()
+;----------------------------------slice selection------------------	
+	d1m5u 	grad{(0)|(0)|(t0)} fq1:f1 fq1:f2 fq1:f3 fq1:f4 gatepulse 1 
+	5u      reset:f1 reset:f2 reset:f3 reset:f4
+        p0:sp0 	ph0
+	d4 	groff
+;----------------------------------slice rephase--------------------
+	d2 	grad{(0)|(0)|(t1)}
+	d3      groff                                
+subr DwiPrep(ph1)  
+        if "lcDs > 0" goto acqDs    
+#include <epi_4ch.mod>                   
+goOn,	2.5u        
+;----------------------------------slice loop-----------------------
+	10u islice
+	d0    DwFl0.inc
+	lo to slice times NSLICES
+	1u zslice  
+;----------------------------------averaging loop-------------------
+        d5
+
+        "lcDs = lcDs - 1"
+        if "lcDs >= 0" goto DiffL      ;dummy scans        
+        
+	lo to DiffL times NA
+;----------------------------------2d loop--------------------------
+	1u igrad Interleaving
+	lo to DiffL times l0
+	1u zgrad Interleaving
+;----------------------------------3d loop--------------------------
+if( ACQ_dim >= 3 )
+{
+	1u igrad r3d
+	lo to DiffL times ACQ_size[2]
+}
+;----------------------------------diffusion loop-------------------
+subr DwiLoop(DiffL)
+;----------------------------------repetitions loop-----------------
+	lo to DiffL times PVM_NRepetitions
+
+SETUP_GOTO(DiffL)
+        goto bye
+        
+; ---- empty acquisition for dummy scans
+acqDs,  1u
+#include <epiDum.mod>
+        goto goOn
+
+
+   
+bye,    1u
+exit
+
+ph0 = 0 2
+ph1 = 1
+
+
