@@ -1,0 +1,175 @@
+%For simulate, we need Phantom,Pulse sequence.
+% define in-plane spin system parameter;
+close all; clear; clc;
+load Imag3DGRE_good.mat;
+gammaHz=4.2574e+3 ; % [Hz/G]
+Nseg=5;
+
+L=[4 4 4]/100; %the readout, phase, slice
+N=size(iField); %point of spin 
+AcqPoint=[200 200 32]; %point of acquire frequency phase slice
+ChirpFlipAngle=15;
+
+SpinContrast=round(abs(iField));
+SpinContrast=SpinContrast/max(SpinContrast(:));
+figure(1);imshow3Dfull(SpinContrast)
+
+nii = make_nii(abs(iField));
+fileprefix='niidata_before.nii'
+save_nii(nii, fileprefix, 0);
+
+[y x z]=...
+   ndgrid(linspace(1,size(SpinContrast,1),N(1)),...
+          linspace(1,size(SpinContrast,2),N(2)),...
+          linspace(1,size(SpinContrast,3),N(3)));
+SpinContrastResize=interp3(SpinContrast,x,y,z);
+
+figure(2);imshow3Dfull(SpinContrastResize(:,1:8:end,:))
+nii1 = make_nii(abs(SpinContrastResize));
+fileprefix='niidata_after.nii'
+save_nii(nii, fileprefix, 0);
+
+
+%%
+ChirpQvalue=250;  % Qvalue of the chirp 
+sw=500000; % unit Hz
+Ta = AcqPoint(1)*AcqPoint(3)/sw/Nseg;
+ChripTP=1/1000; % unit second
+
+spectrum=0;
+% Optionally add some inhomogeneities
+imap.a1 = [0e3 0e3 0e3]; % in Hz/cm
+imap.a2 = [0e6 0e6 0e3]; % in Hz/(cm^2)
+imap.ar = 00; % in Hz
+% Define the phantom
+phantomtype = 'circle';
+phantomscale = [1 1 1];
+
+%% define chirp pulse
+ChirpRFParams.type = 'chirp';
+ChirpRFParams.timestep = 4e-6 ;
+ChirpRFParams.nsteps = ChripTP/ChirpRFParams.timestep; 
+ChirpRFParams.Gmax = ChirpQvalue/ChripTP/L(3); % gradient along y, in Hz/m
+ChirpRFParams.nu_rf_0 = 0; % carrier frequency at the center of the sweep
+Te=ChirpRFParams.timestep*ChirpRFParams.nsteps;
+ChirpRFParams.Gmax = ChirpQvalue/ChripTP/L(3); % gradient along x, in Hz/m
+ChirpRFParams.R = ChirpQvalue/ChripTP/ChripTP;
+ChirpRFParams.wurstn = 40;
+ChirpRFParams.B1max = 3*0.26*sqrt(ChirpRFParams.R)*(ChirpFlipAngle/90);% to set
+if strcmp(ChirpRFParams.type(end-4:end),'chirp')
+    Q = Te^2*ChirpRFParams.R;
+    disp(['The quality factor is ' int2str(ceil(Q))]);
+end
+disp(['Quality factor: ' int2str(ceil(Q))]);
+
+
+
+%% define the acquisition parameters
+FOV = L(1:2);
+ACQParams.timestep = 1/sw;
+ACQParams.NPE = AcqPoint(3); %phase encoding
+ACQParams.nRO = AcqPoint(1); %readout  
+ACQParams.GRO = 1/(FOV(1)*ACQParams.timestep);
+ACQParams.GPE = -ChirpRFParams.Gmax*ChripTP/(ACQParams.NPE*ACQParams.nRO*ACQParams.timestep);
+disp('over');
+
+%% Create the chirp waveform
+ChirpRFwaveform = create_rf_waveform(ChirpRFParams);
+PlotSeqWave.type='pulse';
+PlotSeqWave.shape=ChirpRFwaveform;
+PlotSeqWave.GradDirection='slice';
+PlotSeqBlock{1}=PlotSeqWave;
+
+
+%% Prefocusing lobe as echo in the center
+clear PlotSeqWave Gradwaveform;
+PhaseGrad= 1/FOV(1)/(ACQParams.nRO/2*ACQParams.timestep);
+Gradwaveform.G=[2*pi*ACQParams.GRO; PhaseGrad ;pi*ChirpRFParams.Gmax*Ta/(ACQParams.nRO/2*ACQParams.timestep)]/2/pi;
+Gradwaveform.deltat=ACQParams.nRO/2*ACQParams.timestep;
+PlotSeqWave.type='gradient';
+PlotSeqWave.shape=Gradwaveform;
+PlotSeqWave.GradDirection='phase&readout&slice';
+PlotSeqBlock{2}=PlotSeqWave;
+
+% Create the acquisition trajectory
+ACQtrajectory = epi(ACQParams);
+clear PlotSeqWave;
+PlotSeqWave.type='acquire';
+PlotSeqWave.shape=ACQtrajectory;
+PlotSeqWave.duration=Ta;
+PlotSeqWave.FreqNum=AcqPoint(1);
+PlotSeqWave.PhaseNum=AcqPoint(3);
+PlotSeqBlock{3}=PlotSeqWave;
+disp('over');
+
+%% plot pulse sequence
+PlotPulseSeqence( PlotSeqBlock )
+
+%% 
+[M r offsets] = spin_system3D(L,N,spectrum);
+offsets = inhomogeneise3D(offsets,r,N,imap);
+M(:,3)=M(:,3).*SpinContrast(:);
+TestM=M;
+TestMz=reshape(TestM(:,3),N);
+TestMx=reshape(TestM(:,1),N);
+TestMy=reshape(TestM(:,2),N);
+
+LXYPlane=L(1:2);
+NXYPlane=N(1:2);
+% Spen direction need more points
+NXYPlane(2)=NXYPlane(2)*8;
+[M_xy_Initial r_xy offsets_xy] = spin_system3D(LXYPlane,NXYPlane,spectrum);
+
+
+for iSlice=20
+    lSlice=L(3); % slice direction Fov
+    NSlice=N(3)*10;
+    [MSlice rSlice offsetslice] = spin_system3D(lSlice,NSlice,spectrum);
+    imapSlice.a1 = imap.a1(3); % in Hz/cm
+    imapSlice.a2 = imap.a2(3); % in Hz/(cm^2)
+    imapSlice.ar = 00; % in Hz
+    offsetSlice = inhomogeneise3D(offsetslice,rSlice,NSlice,imapSlice);
+    MSlice = softpulse(MSlice,rSlice(:,1),offsetSlice,RFwaveform{iSlice});
+    PlotMag(MSlice,[1 1 NSlice]);
+    
+    Tpslice = SLR_RF.duration;
+    MSlice = gradientlobe(MSlice,rSlice(:,1),offsetSlice,-2*pi*GSlicemax,Tpslice/2);
+    PlotMag(MSlice,[1 1 NSlice]);
+    
+    MxySlice=MSlice(:,1)+1i*MSlice(:,2);
+    tempdata=sum(reshape(MxySlice,[round(length(MxySlice)/N(3)),N(3)]));
+    
+    tempdata=abs(tempdata);
+    
+    SpinContrastSliceSelc=zeros(size(SpinContrast));
+    for iX=1:N(1)
+        for iY=1:N(2)
+            SpinContrastSliceSelc(iX,iY,:)=squeeze(TestMz(iX,iY,:)).*tempdata';
+        end
+    end
+    SpinContrastAfterSlice=sum(SpinContrastSliceSelc,3);
+   
+    SpinContrastAfterSlice=imresize(SpinContrastAfterSlice,NXYPlane);
+    M_xy_OneSlice=M_xy_Initial;
+    M_xy_OneSlice(:,3)=M_xy_Initial(:,3).*SpinContrastAfterSlice(:);
+    M_xy_OneSlice(:,2)=M_xy_OneSlice(:,3);
+    M_xy_OneSlice(:,3)=0;
+    PlotMag(M_xy_OneSlice,[NXYPlane 1],[LXYPlane L(3)] ,2);
+    [ MFinal_xy FID] = ConsoleSimulate( M_xy_OneSlice,r_xy,offsets_xy, [PlotSeqBlock(5) PlotSeqBlock(7) PlotSeqBlock(8)],[NXYPlane 1],[LXYPlane L(3)]); % the first block is slice relate
+    fidsquare = transpose(reshape(FID,ACQParams.nRO,ACQParams.NPE));
+    for k = 1:ACQParams.NPE
+        if abs(floor(k/2) - k/2 + 0.5) < eps
+            fidsquare(k,1:end) = fidsquare(k,end:-1:1);
+        end
+    end
+    figure
+    imagesc(abs(fidsquare));
+    
+    ftfidsquare = fftshift(fft(fidsquare,[],2),2);
+    figure
+    imagesc(abs(ftfidsquare));
+
+    disp('over')
+end
+%% 
+

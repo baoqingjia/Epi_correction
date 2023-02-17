@@ -1,0 +1,22 @@
+----------------- EPI GRADIENT --------------------
+=== Options: ===
+fract_ky:      80
+nseg,etl,echo: 5, 0, 0
+navigator:     
+rampsamp:      'n'
+ky_order:      'ln'
+tblip:         120.00us
+=== Calculated ===
+np ramp,flat:  0, 0
+skip:          0.00us
+RO amps:       0.000, 0.000G/cm
+PE amp:        0.000G/cm
+Total duration 0.00ms
+Waveform pts   0
+petable:       '3DSPEN_ZPE_similartoFSE_nv160_f80_lin5'
+=== Tweakers: ===
+groa, grora:   0.000, 1.000
+tep:           0.000 us
+ssepi:         0
+Errors:        0
+----------------------------------------------------
